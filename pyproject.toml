@@ -5,10 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "megalodon"
 readme = "README.md"
-description = "Megalodon: Applications of Modular Co-Design for De Novo 3D Molecule Generation"
-authors = [{ name = "NVIDIA", email = "bionemofeedback@nvidia.com" }]
+description = "Right into the Saddle: Stereochemistry-Aware Generation of Molecular Transition States"
+authors = [
+    { name = "Filipp Nikitin", email = "filipp.nikitin.96@gmail.com" }
+]
 requires-python = ">=3.10"
-license = { file = "LICENSE/license_code.txt" }
+license = { file = "LICENSE.md" }
 dynamic = ["version"]
 dependencies = [
     # external
@@ -27,6 +29,10 @@ dependencies = [
     'h5py==3.12.1',
     'pandas==2.3.3',
 ]
+
+[project.urls]
+Paper = "https://doi.org/10.26434/chemrxiv.15001681/v1"
+Repository = "https://github.com/isayevlab/rits"
 
 [tool.setuptools.packages.find]
 where = ["src"]

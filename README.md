@@ -2,16 +2,14 @@
 
 <div align="center">
   <a href="https://scholar.google.com/citations?user=DOljaG8AAAAJ&hl=en" target="_blank">Filipp Nikitin<sup>1,2</sup></a>   <b>·</b>  
-  <a href="#" target="_blank">Dylan M. Anstine<sup>2,3</sup></a>   <b>·</b>  
-  <a href="https://olexandrisayev.com/" target="_blank">Olexandr Isayev<sup>1,2,4*</sup></a>
+  <a href="#" target="_blank">Dylan M. Anstine<sup>3</sup></a>   <b>·</b>  
+  <a href="https://olexandrisayev.com/" target="_blank">Olexandr Isayev<sup>1,2*</sup></a>
   <br>
   <sup>1</sup>Ray and Stephanie Lane Computational Biology Department, Carnegie Mellon University, Pittsburgh, PA, USA
   <br>
   <sup>2</sup>Department of Chemistry, Carnegie Mellon University, Pittsburgh, PA, USA
   <br>
   <sup>3</sup>Department of Chemical Engineering and Materials Science, Michigan State University, East Lansing, MI, USA
-  <br>
-  <sup>4</sup>Department of Materials Science and Engineering, Carnegie Mellon University, Pittsburgh, PA, USA
   <br><br>
   <a href="#" target="_blank">📄 Paper</a>   <b>·</b>  
   <a href="#citation">📖 Citation</a>   <b>·</b>  
