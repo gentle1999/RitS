@@ -1,9 +1,9 @@
 # Right into the Saddle: Stereochemistry-Aware Generation of Molecular Transition States
 
 <div align="center">
-  <a href="https://scholar.google.com/citations?user=DOljaG8AAAAJ&hl=en" target="_blank">Filipp&nbsp;Nikitin<sup>1,2</sup></a> &emsp; <b>&middot;</b> &emsp;
-  <a href="#" target="_blank">Dylan&nbsp;M.&nbsp;Anstine<sup>2,3</sup></a> &emsp; <b>&middot;</b> &emsp;
-  <a href="https://olexandrisayev.com/" target="_blank">Olexandr&nbsp;Isayev<sup>1,2,4*</sup></a>
+  <a href="https://scholar.google.com/citations?user=DOljaG8AAAAJ&hl=en" target="_blank">Filipp Nikitin<sup>1,2</sup></a>   <b>·</b>  
+  <a href="#" target="_blank">Dylan M. Anstine<sup>2,3</sup></a>   <b>·</b>  
+  <a href="https://olexandrisayev.com/" target="_blank">Olexandr Isayev<sup>1,2,4*</sup></a>
   <br>
   <sup>1</sup>Ray and Stephanie Lane Computational Biology Department, Carnegie Mellon University, Pittsburgh, PA, USA
   <br>
@@ -13,10 +13,10 @@
   <br>
   <sup>4</sup>Department of Materials Science and Engineering, Carnegie Mellon University, Pittsburgh, PA, USA
   <br><br>
-  <a href="#" target="_blank">📄&nbsp;Paper</a> &emsp; <b>&middot;</b> &emsp;
-  <a href="#citation">📖&nbsp;Citation</a> &emsp; <b>&middot;</b> &emsp;
-  <a href="#setup">⚙️&nbsp;Setup</a> &emsp; <b>&middot;</b> &emsp;
-  <a href="https://github.com/isayevlab/TSMegaGen" target="_blank">🔗&nbsp;GitHub</a>
+  <a href="#" target="_blank">📄 Paper</a>   <b>·</b>  
+  <a href="#citation">📖 Citation</a>   <b>·</b>  
+  <a href="#setup">⚙️ Setup</a>   <b>·</b>  
+  <a href="https://github.com/isayevlab/rits" target="_blank">🔗 GitHub</a>
   <br><br>
   <span><sup>*</sup>Corresponding author: olexandr@olexandrisayev.com</span>
 </div>
@@ -31,22 +31,15 @@
 
 ### Abstract
 
-Traditional strategies for calculating molecular transition states are laborious and computationally intensive, thus bottlenecking the scale of reaction modeling. To overcome this limitation, we introduce a flow-matching model, RitS, that directly generates high-quality transition states using only the connectivity of reactants and products as input. Leveraging a newly constructed dataset of approximately 2 million transition states, we substantially expand the applicability of previous approaches, which are typically trained on the Transition1x dataset, to cover CHNOSFP elements, larger molecular systems, and both neutral and charged reactions. On the Transition1x benchmark, our model achieves superior performance compared to existing generative approaches. Importantly, RitS enables stereochemistry-aware transition-state generation. We demonstrate selective generation of endo/exo Diels-Alder transition states as well as stereodefined E/Z transition states for chlorostyrene halogenation reactions. Furthermore, the model generalizes to complex multistep organocatalytic reactions, including the classical Hajos-Parrish-Eder-Sauer-Wiechert reaction. Overall, this work represents an important step toward scalable, automated, and high-throughput reaction mechanism analysis that can continue to improve as larger mechanistic datasets become available.
-
+Traditional strategies for calculating molecular transition states are laborious and computationally intensive, thus bottlenecking the scale of reaction modeling. To overcome this limitation, we introduce a flow-matching model, RitS, that directly generates high-quality transition states using only the connectivity of reactants and products as input. Leveraging a newly constructed dataset of approximately 1.7 million transition states, we substantially expand the applicability of previous approaches, which are typically trained on the Transition1x dataset, to cover CHNOSFP elements, larger molecular systems, and both neutral and charged reactions. On the Transition1x benchmark, our model achieves superior performance compared to existing generative approaches. Importantly, RitS enables stereochemistry-aware transition-state generation. We demonstrate selective generation of endo/exo Diels-Alder transition states as well as stereodefined E/Z transition states for chlorostyrene halogenation reactions. Furthermore, the model generalizes to complex multistep organocatalytic reactions, including the classical Hajos-Parrish-Eder-Sauer-Wiechert reaction. Overall, this work represents an important step toward scalable, automated, and high-throughput reaction mechanism analysis that can continue to improve as larger mechanistic datasets become available.
 
 ## Key Features
 
-- **Direct transition-state generation**  
-  Generates 3D transition-state geometries directly from reactant and product connectivity without requiring hand-crafted initial guesses.
-
-- **Stereochemistry-aware generation**  
-  Supports explicit stereochemical control, enabling generation of transition states corresponding to competing pathways such as **endo/exo** and **E/Z** configurations.
-
-- **Flow-matching generative model**  
-  Uses a flow-matching objective with **Kabsch-aligned optimal transport** for stable and efficient molecular geometry generation.
-
-- **Large-scale training dataset**  
-  Trained on a dataset of **~2 million transition-state reactions** constructed through mechanistic enumeration and active learning.
+- **Direct transition-state generation**Generates 3D transition-state geometries directly from reactant and product connectivity without requiring hand-crafted initial guesses.
+- **Stereochemistry-aware generation**Supports explicit stereochemical control, enabling generation of transition states corresponding to competing pathways such as **endo/exo** and **E/Z** configurations.
+- **Flow-matching generative model**Uses a flow-matching objective with **Kabsch-aligned optimal transport** for stable and efficient molecular geometry generation.
+- **Large-scale training dataset**
+  Trained on a dataset of **~1.7 million transition-state reactions** constructed through mechanistic enumeration and active learning.
 
 ---
 
@@ -72,6 +65,7 @@ Installation will usually take up to 20 minutes.
   - Possible, but not recommended and not systematically studied by the authors
 
 OOM mitigation for larger molecules:
+
 - reduce inference batch size (`--batch_size` in sampling, or `data.inference_batch_size` in config)
 
 ### Prerequisites
@@ -84,7 +78,7 @@ OOM mitigation for larger molecules:
 
 ```bash
 # Clone the repository
-git clone https://github.com/isayevlab/RitS.git
+git clone https://github.com/isayevlab/rits.git
 cd RitS
 
 # Create and activate conda environment
@@ -98,6 +92,9 @@ pip install -e .
 
 If you prefer a fully conda-based setup (recommended for RDKit), you can install RDKit via conda-forge before running `pip install -r requirements.txt`.
 
+The pinned dependencies include `h5py`, `numcodecs`, and the Zarr v2 API used
+by the HDF5 preprocessing pipeline.
+
 For the interactive Streamlit app and IRC post-processing, also install:
 
 ```bash
@@ -107,28 +104,63 @@ conda install -c conda-forge xtb
 
 ### Data Setup
 
-Release folder: [Google Drive](https://drive.google.com/drive/folders/1DD2hmWx3E1klM3Ljon5r4gdquGoN_4v6?usp=sharing)
+Release folder: [Google Drive](https://drive.google.com/drive/folders/1xGX0uZgaGHU_e-a8hDdflV4wWApczNVU?usp=sharing)
 
 Available now:
+
 - Transition1x training data
-- Transition1x checkpoint
-- RitS checkpoint trained on our large GFN2-xTB dataset (`data/rits.ckpt`)
+- RGD1-ChEMBL-extended GFN2-xTB training data (`data/rgd1_chembl_extended.h5`)
+- Transition1x checkpoint (`data/ts1x_rits.ckpt`)
+- RitS checkpoint trained on RGD1-ChEMBL-extended (`data/rits.ckpt`)
 
-Will be available later:
-- The large GFN2-xTB dataset itself
-
-Expected local layout:
+Expected local layout after downloading and preprocessing both datasets:
 
 ```text
 data/
-  rits.ckpt
-  ts1x_rits.ckpt
-  Transition1x/
-    wb97xd3/
-      raw_data/
-        wb97xd3_ts.xyz
-        wb97xd3_fwd_rev_chemprop.csv
+├── rits.ckpt
+├── ts1x_rits.ckpt
+├── rgd1_chembl_extended.h5
+├── rits_dataset/
+│   └── processed/
+│       ├── train_h.pt
+│       ├── val_h.pt
+│       └── test_h.pt
+├── Transition1x/
+│   └── wb97xd3/
+│       ├── feat_dict.pkl
+│       └── raw_data/
+│           ├── wb97xd3_ts.xyz
+│           └── wb97xd3_fwd_rev_chemprop.csv
+└── ts1x/
+    └── processed/
+        ├── train_h.pt
+        ├── val_h.pt
+        └── test_h.pt
 ```
+
+The downloaded files are the checkpoints, `rgd1_chembl_extended.h5`, and the
+Transition1x source files. The `rits_dataset/processed/` and `ts1x/processed/`
+directories are generated by the following preprocessing commands.
+
+#### RGD1-ChEMBL-extended
+
+Prepare the large dataset used by RitS:
+
+```bash
+python data_processing/prepare_rgd1_chembl_extended.py \
+    --h5_file data/rgd1_chembl_extended.h5 \
+    --save_data_folder data/rits_dataset
+```
+
+This stage creates random 96%/2%/2% train/validation/test splits. By default it
+kekulizes aromatic systems into explicit single/double bonds and adds the
+model's stereochemical pseudo-edges. Training stereochemistry is assigned from
+the reactant and product 3D coordinates in the HDF5 file. During inference, the
+same edge encoding is constructed from stereochemistry specified in the input
+SMARTS. These defaults match the released `rits.ckpt`; they can be disabled for
+experiments with `--no-kekulize` or `--no-add-stereo`.
+
+#### Transition1x
 
 Preprocess Transition1x for training:
 
@@ -139,7 +171,6 @@ python data_processing/prepare_ts1x_for_training.py \
     --save_dir data/ts1x
 ```
 
-
 ---
 
 ## Usage
@@ -149,13 +180,23 @@ Lightweight runnable examples are available in [`examples/`](examples/), with on
 ### Model Training
 
 ```bash
-# Train transition state model from scratch
+# Train RitS from scratch on preprocessed RGD1-ChEMBL-extended
 python scripts/train.py \
     --config-path=conf \
     --config-name rits \
     train.gpus=1 \
     train.seed=28 \
     run_name=test_train \
+    outdir="../test_runs" \
+    data.dataset_root="./data/rits_dataset"
+
+# Train the Transition1x model instead
+python scripts/train.py \
+    --config-path=conf \
+    --config-name ts1x_rits \
+    train.gpus=1 \
+    train.seed=28 \
+    run_name=ts1x_train \
     outdir="../test_runs" \
     data.dataset_root="./data/ts1x"
 
@@ -218,17 +259,20 @@ python scripts/sample_transition_state.py \
 ```
 
 **Input formats:**
+
 - **SMILES**: Atom-mapped SMILES with explicit hydrogens (e.g., `[C:1][H:2]`)
 - **XYZ**: Standard XYZ coordinate files (bonds will be inferred using OpenBabel)
 
 **Notes:**
+
 - SMILES must have explicit hydrogens and can use atom mapping to specify atom correspondence
 - Reactant and product must have the same number of atoms
-- Output is saved as XYZ file(s) with transition state coordinates   
+- Output is saved as XYZ file(s) with transition state coordinates
 
 #### Available Configurations
 
 **Transition State Configs:**
+
 - `rits.yaml` - RitS stereochemistry-aware conformer generation model trained on our dataset
 - `ts1x_rits.yaml` - RitS configuration for Transition1x training/evaluation
 
@@ -275,8 +319,14 @@ python scripts/train.py \
 
 RitS preprint citation (coming soon):
 
-```bibtex
-@article{
+```@article{nikitin2026rits,
+  title={Right into the Saddle: Stereochemistry-Aware Generation of
+  Molecular Transition States},
+  author={Nikitin, Filipp and Anstine, Dylan M. and Isayev, Olexandr},
+  journal={ChemRxiv},
+  year={2026},
+  doi={10.26434/chemrxiv.15001681/v1},
+  url={https://doi.org/10.26434/chemrxiv.15001681/v1}
 }
 ```
 

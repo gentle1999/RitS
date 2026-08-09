@@ -175,7 +175,7 @@ class MimicSemlaWrapper(MegalodonDotFN):
         else:
             prefix = "gen"
         # Load the state dictionary from the checkpoint
-        checkpoint = torch.load(ckpt_path)["state_dict"]
+        checkpoint = torch.load(ckpt_path, weights_only=False)["state_dict"]
 
         # Extract the dynamics submodule state dictionary
         dynamics_state_dict = {k.replace(f"{prefix}.dynamics.", ""): v for k, v in

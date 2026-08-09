@@ -590,6 +590,7 @@ def main():
         sampling_params=cfg.sample,
         batch_preprocessor=batch_preprocessor,
         strict=True,
+        weights_only=False,
     )
     model = model.to(device).eval()
 

@@ -1,5 +1,6 @@
 import time
 from copy import deepcopy
+from pathlib import Path
 from typing import Dict
 
 import numpy as np
@@ -263,6 +264,18 @@ class Forces(nn.Module):
         return data
 
 
+def load_aimnet2_module(model_path, device="cpu"):
+    """Load TorchScript or trusted pickled AIMNet2 artifacts on PyTorch 2.12."""
+    model_path = Path(model_path)
+    if model_path.suffix == ".jpt":
+        return torch.jit.load(str(model_path), map_location=device)
+
+    model = torch.load(str(model_path), map_location=device, weights_only=False)
+    if not isinstance(model, nn.Module):
+        raise TypeError(f"Unsupported AIMNet2 model object: {type(model)!r}")
+    return model
+
+
 class MoleculeAIMNet2Metrics:
     """
     Compute 3D metrics for molecules, including bond lengths, angles, and torsions.
@@ -270,7 +283,7 @@ class MoleculeAIMNet2Metrics:
 
     def __init__(self, model_path, batchsize, opt_metrics=False, device="cpu", opt_params=None,
                  chunked=False):
-        self.model = Forces(torch.jit.load(model_path)).to(device).eval()
+        self.model = Forces(load_aimnet2_module(model_path, device=device)).to(device).eval()
         self.opt_metrics = opt_metrics
         self.opt_params = opt_params or {}
         self.device = device

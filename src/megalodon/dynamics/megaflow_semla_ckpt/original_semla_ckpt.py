@@ -151,7 +151,7 @@ class MimicOriginalSemlaWrapper(SemlaGenerator):
         else:
             prefix = "gen"
         # Load the state dictionary from the checkpoint
-        checkpoint = torch.load(ckpt_path)["state_dict"]
+        checkpoint = torch.load(ckpt_path, weights_only=False)["state_dict"]
 
         state_dict = {k.replace(f"{prefix}.module.", ""): v for k, v in checkpoint.items() if k.startswith(f"{prefix}.module")}
 

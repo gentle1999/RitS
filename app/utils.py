@@ -332,6 +332,7 @@ def load_ts_model(device: str = "auto"):
         sampling_params=cfg.sample,
         batch_preprocessor=bp,
         strict=True,
+        weights_only=False,
     )
     return model.to(device).eval(), cfg, device
 

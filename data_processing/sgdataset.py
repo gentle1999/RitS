@@ -10,6 +10,20 @@ from numpy import ndarray
 from torch.utils.data.dataloader import DataLoader, default_collate
 
 
+DEFAULT_CHUNK_SIZE_FIRST_DIM = 100_000
+
+
+def _first_dim_chunks(shape, chunk_size_first_dim):
+    if chunk_size_first_dim is None or len(shape) == 0:
+        return None
+    chunk_size_first_dim = int(chunk_size_first_dim)
+    if chunk_size_first_dim <= 0:
+        raise ValueError(
+            f"chunk_size_first_dim must be positive, got {chunk_size_first_dim}"
+        )
+    return (min(int(shape[0]), chunk_size_first_dim),) + tuple(shape[1:])
+
+
 def to_array(value, copy=False):
     if isinstance(value, zarr.hierarchy.Array):
         value = value[:]
@@ -66,10 +80,12 @@ class DataGroup:
             cow: bool = True,
             strict: bool = True,
             keys=None,
+            chunk_size_first_dim: int = DEFAULT_CHUNK_SIZE_FIRST_DIM,
             **kwargs
     ):
         self._root = None
         self.strict = strict
+        self.chunk_size_first_dim = chunk_size_first_dim
         self._data = self.load_data(data, keys)
         self.assert_strictness()
         self.cow = cow
@@ -122,11 +138,17 @@ class DataGroup:
         del self[old]
 
     def __setitem__(self, key, value):
+        arr = to_array(value)
         if self.cow or self._root is None:
-            self._data[key] = to_array(value)
+            self._data[key] = arr
         else:
-            self._data[key] = self._root.array(key, to_array(value),
-                                               overwrite=True)
+            chunks = _first_dim_chunks(arr.shape, self.chunk_size_first_dim)
+            if chunks is None:
+                self._data[key] = self._root.array(key, arr, overwrite=True)
+            else:
+                self._data[key] = self._root.array(
+                    key, arr, overwrite=True, chunks=chunks
+                )
 
     def __getitem__(self, item: Union[str, int, slice, ndarray, Tuple[str, ndarray]]) -> Union[
         Any, Dict[str, ndarray]]:
@@ -305,8 +327,15 @@ class DataGroup:
         for idx in idxs:
             yield dict((k, to_array(v)[idx]) for k, v in self.items() if k in keys)
 
-    def copy(self, keys=None, root=None):
-        ins = self.__class__(root, False, self.strict)
+    def copy(self, keys=None, root=None, chunk_size_first_dim=None):
+        if chunk_size_first_dim is None:
+            chunk_size_first_dim = self.chunk_size_first_dim
+        ins = self.__class__(
+            root,
+            False,
+            self.strict,
+            chunk_size_first_dim=chunk_size_first_dim,
+        )
         keys = _get_keys(object_keys=self.keys(), user_keys=keys)
         for key in keys:
             ins[key] = to_array(self[key], copy=True)
@@ -342,11 +371,13 @@ class SizeGroupedDataset:
             strict: bool = True,
             to_memory: bool = False,
             cow: bool = True,
-            keys: Iterable = None):
+            keys: Iterable = None,
+            chunk_size_first_dim: int = DEFAULT_CHUNK_SIZE_FIRST_DIM):
 
         self._root = None
         self.cow = cow
         self.strict = strict
+        self.chunk_size_first_dim = chunk_size_first_dim
         self._data = dict()
         self._meta = dict()
         self.load_data(data, keys=keys)
@@ -377,7 +408,13 @@ class SizeGroupedDataset:
 
         if isinstance(data, zarr.hierarchy.Group) or isinstance(data, dict):
             for k in data.keys():
-                self._data[int(k)] = DataGroup(data[k], cow=self.cow, strict=self.strict, keys=keys)
+                self._data[int(k)] = DataGroup(
+                    data[k],
+                    cow=self.cow,
+                    strict=self.strict,
+                    keys=keys,
+                    chunk_size_first_dim=self.chunk_size_first_dim,
+                )
         else:
             raise NotImplementedError(f"Data type {type(data)} is not supported.")
 
@@ -387,7 +424,13 @@ class SizeGroupedDataset:
             with Cow(self, False):
                 for k, g in f.items():
                     k = int(k)
-                    self[k] = DataGroup.from_h5(g, keys=keys, cow=self.cow, strict=self.strict)
+                    self[k] = DataGroup.from_h5(
+                        g,
+                        keys=keys,
+                        cow=self.cow,
+                        strict=self.strict,
+                        chunk_size_first_dim=self.chunk_size_first_dim,
+                    )
             self._meta = dict(f.attrs)
 
     def extend_from_iterable(self, data: Iterable,
@@ -508,7 +551,11 @@ class SizeGroupedDataset:
             self[key].to_memory(keys=keys)
 
     def get_shard(self, idx, size, keys=None):
-        ins = self.__class__()
+        ins = self.__class__(
+            strict=self.strict,
+            cow=self.cow,
+            chunk_size_first_dim=self.chunk_size_first_dim,
+        )
 
         for key in self.keys():
             ins[key] = self[key].get_shard(idx, size, keys=keys)
@@ -576,9 +623,10 @@ class SizeGroupedDataset:
             root = self._root.create_group(f"{key:03d}", overwrite=True)
         else:
             root = None
-        value = value.copy(root=root)
+        value = value.copy(root=root, chunk_size_first_dim=self.chunk_size_first_dim)
         value.cow = self.cow
         value.strict = self.strict
+        value.chunk_size_first_dim = self.chunk_size_first_dim
         self._data[key] = value
 
     def __getitem__(self, item: Union[int, Tuple[int, Sequence]]) -> Union[Dict, Tuple[Dict, Dict]]:
@@ -618,7 +666,12 @@ class SizeGroupedDataset:
 
     def merge(self, other, strict=True):
         if not isinstance(other, self.__class__):
-            other = self.__class__(other)
+            other = self.__class__(
+                other,
+                strict=self.strict,
+                cow=self.cow,
+                chunk_size_first_dim=self.chunk_size_first_dim,
+            )
         if strict:
             assert set(other.datakeys()) == set(self.datakeys())
         else:
@@ -639,6 +692,8 @@ class SizeGroupedDataset:
                     self[k].to_memory()
 
     def random_split(self, *fractions, keys=None, root=None, seed=None, **kwargs):
+        kwargs = dict(kwargs)
+        kwargs.setdefault("chunk_size_first_dim", self.chunk_size_first_dim)
 
         clean_group(root)
         datasets = list()

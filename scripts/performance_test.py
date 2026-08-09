@@ -105,7 +105,8 @@ def load_model(cfg_path: Path, ckpt_path: Path, n_steps: int):
         loss_params=cfg.loss,
         interpolant_params=cfg.interpolant,
         sampling_params=cfg.sample,
-        batch_preporcessor=BatchPreProcessor(cfg.data.aug_rotations, cfg.data.scale_coords),
+        batch_preprocessor=BatchPreProcessor(cfg.data.aug_rotations, cfg.data.scale_coords),
+        weights_only=False,
     )
     cfg.interpolant.timesteps = int(n_steps)
     device = "cuda" if torch.cuda.is_available() else "cpu"
