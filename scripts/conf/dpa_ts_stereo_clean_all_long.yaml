@@ -1,0 +1,13 @@
+defaults:
+  - dpa_ts_finetune_full
+  - _self_
+
+run_name: dpa_ts_stereo_clean_all_long_seed48
+resume: null
+finetune_from: data/rits.ckpt
+
+data:
+  dataset_root: data/dpa_ts_stereo_clean_all_train
+
+train:
+  enable_progress_bar: false

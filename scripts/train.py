@@ -21,7 +21,8 @@ from pathlib import Path
 import torch
 import hydra
 from lightning import pytorch as pl
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import EarlyStopping, LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.loggers import TensorBoardLogger
 from omegaconf import DictConfig, OmegaConf
 
 from megalodon.data.batch_preprocessor import BatchPreProcessor
@@ -62,23 +63,35 @@ def main(cfg: DictConfig) -> None:
         batch_preprocessor = BatchPreProcessor(aug_rotations=cfg.data.aug_rotations,
                                            scale_coords=cfg.data.scale_coords)
 
+    resume_from = OmegaConf.select(cfg, "resume", default=None)
+    finetune_from = OmegaConf.select(cfg, "finetune_from", default=None)
+    # ``init_from_ckpt`` is the name used by the upstream fork; retain it as
+    # an alias for the local ``finetune_from`` option.
     init_from_ckpt = OmegaConf.select(cfg, "init_from_ckpt", default=None)
-    if cfg.resume:
-        if os.path.isdir(cfg.resume):
-            cfg.resume = f"{cfg.resume}/last.ckpt"
+    if finetune_from and init_from_ckpt:
+        raise ValueError("finetune_from and init_from_ckpt are mutually exclusive")
+    finetune_from = finetune_from or init_from_ckpt
+    if resume_from and finetune_from:
+        raise ValueError("resume and finetune_from are mutually exclusive")
+
+    if resume_from:
+        if os.path.isdir(resume_from):
+            resume_from = f"{resume_from}/last.ckpt"
             ckpt = "last"
         else:
-            ckpt = cfg.resume
-        pl_module = Graph3DInterpolantModel.load_from_checkpoint(cfg.resume,
+            ckpt = resume_from
+        pl_module = Graph3DInterpolantModel.load_from_checkpoint(resume_from,
                                                                  loss_fn=loss_fn,
                                                                  loss_params=cfg.loss,
                                                                  interpolant_params=cfg.interpolant,
                                                                  sampling_params=cfg.sample,
                                                                  batch_preprocessor=batch_preprocessor,
                                                                  weights_only=False)
-    elif init_from_ckpt:
+    elif finetune_from:
+        if os.path.isdir(finetune_from):
+            finetune_from = f"{finetune_from}/last.ckpt"
         pl_module = Graph3DInterpolantModel.load_from_checkpoint(
-            init_from_ckpt,
+            finetune_from,
             loss_fn=loss_fn,
             optimizer_params=cfg.optimizer,
             lr_scheduler_params=cfg.lr_scheduler,
@@ -91,6 +104,7 @@ def main(cfg: DictConfig) -> None:
             batch_preprocessor=batch_preprocessor,
             weights_only=False,
         )
+        # Fine-tuning starts a fresh Lightning run with new optimizer/scheduler state.
         ckpt = None
     else:
         pl_module = Graph3DInterpolantModel(
@@ -107,7 +121,7 @@ def main(cfg: DictConfig) -> None:
         )
         ckpt = None
     wandb_resume = cfg.wandb_params.resume if "resume" in cfg.wandb_params else "allow"
-    logger = pl.loggers.WandbLogger(
+    wandb_logger = pl.loggers.WandbLogger(
         save_dir=cfg.outdir,
         project=cfg.wandb_params.project,
         group=cfg.wandb_params.group,
@@ -116,30 +130,52 @@ def main(cfg: DictConfig) -> None:
         resume=wandb_resume,
         mode=cfg.wandb_params.mode,
     )
-    logger.log_hyperparams(cfg)
+    tensorboard_logger = TensorBoardLogger(
+        save_dir=cfg.outdir,
+        name="tensorboard",
+        version="",
+    )
+    loggers = [wandb_logger, tensorboard_logger]
+    logger_hparams = OmegaConf.to_container(cfg, resolve=True)
+    for logger in loggers:
+        # Lightning adds the module hparams later; keep this mutable so resumed
+        # runs can merge both sets without OmegaConf struct-key errors.
+        logger.log_hyperparams(logger_hparams)
 
     datamodule = MoleculeDataModule(cfg.data.dataset_root,
                                     cfg.data.processed_folder,
                                     cfg.data.batch_size,
                                     cfg.data.data_loader_type,
-                                    cfg.data.inference_batch_size)
+                                    cfg.data.inference_batch_size,
+                                    validation_data_loader_type=OmegaConf.select(
+                                        cfg, "data.validation_data_loader_type", default=None
+                                    ))
 
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     last_checkpoint_callback = ModelCheckpoint(
         dirpath=Path(cfg.outdir, 'checkpoints'),
         save_last=True,
-        every_n_train_steps=cfg.train.checkpoint_every_n_train_steps,
         save_on_train_epoch_end=True,
-        filename="last-{epoch}-{step}",
     )
-    metric_name = cfg.train.checkpoint_monitor.replace("/", "_")
+    periodic_checkpoint_callback = None
+    checkpoint_every_n_train_steps = OmegaConf.select(
+        cfg, "train.checkpoint_every_n_train_steps", default=0
+    )
+    if checkpoint_every_n_train_steps > 0:
+        periodic_checkpoint_callback = ModelCheckpoint(
+            dirpath=Path(cfg.outdir, 'checkpoints'),
+            save_top_k=-1,
+            every_n_train_steps=checkpoint_every_n_train_steps,
+            save_on_train_epoch_end=False,
+            filename="periodic-{epoch}-{step}",
+        )
     best_checkpoint_callback = ModelCheckpoint(
         dirpath=Path(cfg.outdir, 'checkpoints'),
         save_top_k=5,
         monitor=cfg.train.checkpoint_monitor,
         mode=cfg.train.checkpoint_monitor_mode,
-        filename="best-{epoch}-{step}--{" + metric_name + ":.3f}",
+        filename="best-{epoch}-{step}",
     )
     # Additional checkpoint based on train loss as backup (saves best 5 by train loss epoch avg)
     train_loss_checkpoint_callback = ModelCheckpoint(
@@ -209,12 +245,38 @@ def main(cfg: DictConfig) -> None:
         best_checkpoint_callback,
         train_loss_checkpoint_callback,
     ]
+    if periodic_checkpoint_callback is not None:
+        callbacks.append(periodic_checkpoint_callback)
+    early_stopping_patience = OmegaConf.select(
+        cfg, "train.early_stopping.patience", default=None
+    )
+    if early_stopping_patience is not None:
+        callbacks.append(
+            EarlyStopping(
+                monitor=OmegaConf.select(
+                    cfg,
+                    "train.early_stopping.monitor",
+                    default=cfg.train.checkpoint_monitor,
+                ),
+                mode=OmegaConf.select(
+                    cfg,
+                    "train.early_stopping.mode",
+                    default=cfg.train.checkpoint_monitor_mode,
+                ),
+                min_delta=OmegaConf.select(
+                    cfg, "train.early_stopping.min_delta", default=0.0
+                ),
+                patience=early_stopping_patience,
+                check_finite=True,
+                verbose=True,
+            )
+        )
     if evaluation_callback is not None:
         callbacks.insert(1, evaluation_callback)
 
     trainer = pl.Trainer(
         max_epochs=cfg.train.n_epochs,
-        logger=logger,
+        logger=loggers,
         callbacks=callbacks,
         enable_progress_bar=cfg.train.enable_progress_bar,
         accelerator='gpu',
@@ -224,13 +286,25 @@ def main(cfg: DictConfig) -> None:
         check_val_every_n_epoch=cfg.train.val_freq,
         gradient_clip_val=cfg.train.gradient_clip_value,
         log_every_n_steps=cfg.train.log_freq,  # for train steps
-        num_sanity_val_steps=0
+        max_steps=OmegaConf.select(cfg, "train.max_steps", default=-1),
+        limit_train_batches=OmegaConf.select(cfg, "train.limit_train_batches", default=1.0),
+        limit_val_batches=OmegaConf.select(cfg, "train.limit_val_batches", default=1.0),
+        num_sanity_val_steps=OmegaConf.select(cfg, "train.num_sanity_val_steps", default=0),
     )
 
     train_loader = datamodule.train_dataloader()
     val_loader = datamodule.val_dataloader()
     trainer.fit(model=pl_module, train_dataloaders=train_loader, val_dataloaders=val_loader,
                 ckpt_path=ckpt)
+
+    best_model_path = best_checkpoint_callback.best_model_path
+    if best_model_path:
+        best_alias = Path(cfg.outdir, "checkpoints", "best.ckpt")
+        alias_tmp = best_alias.with_suffix(".ckpt.tmp")
+        alias_tmp.unlink(missing_ok=True)
+        alias_tmp.symlink_to(Path(best_model_path).name)
+        alias_tmp.replace(best_alias)
+        logging.info(f"Best validation checkpoint: {best_model_path}")
 
 
 if __name__ == "__main__":

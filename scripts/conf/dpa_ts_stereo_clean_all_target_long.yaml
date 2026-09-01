@@ -1,0 +1,19 @@
+defaults:
+  - dpa_ts_finetune_full
+  - _self_
+
+run_name: dpa_ts_stereo_clean_all_target_long_seed48
+resume: null
+finetune_from: data/rits.ckpt
+
+data:
+  dataset_root: data/dpa_ts_stereo_clean_all_train_dpa_val
+
+train:
+  # All clean DPA structures are training data. The overlapping DPA val loader
+  # is a same-domain convergence diagnostic, not an independent early-stop set.
+  n_epochs: 500
+  max_steps: -1
+  enable_progress_bar: false
+  early_stopping:
+    patience: null

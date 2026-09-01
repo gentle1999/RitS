@@ -28,7 +28,8 @@ def parse_reaction_smiles(reaction_smiles):
     return parts[0], parts[1]
 
 
-def worker(gpu_id, job_queue, completed_queue, config, ckpt, output_dir, n_samples, num_steps, kekulize, add_stereo, batch_size):
+def worker(gpu_id, job_queue, completed_queue, config, ckpt, output_dir, n_samples,
+           num_steps, kekulize, add_stereo, batch_size, seed_start):
     """Worker process that loads model once and generates TSs for all assigned reactions."""
     os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
 
@@ -108,21 +109,50 @@ def worker(gpu_id, job_queue, completed_queue, config, ckpt, output_dir, n_sampl
                 add_stereo=add_stereo
             )
 
-            # Replicate for n_samples
-            all_data_list = [deepcopy(data) for _ in range(n_samples)]
-
-            loader = DataLoader(all_data_list, batch_size=batch_size)
-
             # Sample
             generated_ts_coords = []
             numbers_list = []
 
-            for batch in loader:
+            if seed_start is None:
+                all_data_list = [deepcopy(data) for _ in range(n_samples)]
+                batches = ((None, batch) for batch in DataLoader(
+                    all_data_list, batch_size=batch_size
+                ))
+            else:
+                all_data_list = [deepcopy(data) for _ in range(n_samples)]
+                loader = DataLoader(all_data_list, batch_size=batch_size)
+                batches = []
+                sample_offset = 0
+                for batch in loader:
+                    seeds = list(range(
+                        seed_start + sample_offset,
+                        seed_start + sample_offset + batch.num_graphs,
+                    ))
+                    batches.append((seeds, batch))
+                    sample_offset += batch.num_graphs
+
+            for seeds, batch in batches:
                 batch = batch.to(model.device)
+                initial_priors = None
+                if seeds is not None:
+                    n_atoms = data.num_nodes
+                    seeded_priors = []
+                    for seed in seeds:
+                        generator = torch.Generator(device=model.device).manual_seed(seed)
+                        x0 = torch.randn(
+                            (n_atoms, 3), generator=generator, device=model.device
+                        )
+                        x0 = x0 - x0.mean(dim=0, keepdim=True)
+                        seeded_priors.append(x0)
+                    # PyG batches flatten graphs along the node dimension.
+                    initial_priors = {
+                        "ts_coord": torch.cat(seeded_priors, dim=0)
+                    }
 
                 with torch.no_grad():
                     sample = model.sample(
-                        batch=batch, timesteps=timesteps, pre_format=True
+                        batch=batch, timesteps=timesteps, pre_format=True,
+                        initial_priors=initial_priors,
                     )
 
                 coords_list = convert_coords_to_np(sample)
@@ -136,7 +166,11 @@ def worker(gpu_id, job_queue, completed_queue, config, ckpt, output_dir, n_sampl
             # Write output
             with open(output_file, "w") as f:
                 for coords, numbers in zip(generated_ts_coords, numbers_list):
-                    xyz_content = coords_to_xyz_string(coords, numbers)
+                    # Keep the exact source reaction in every XYZ comment line so
+                    # seed-split files remain self-describing and traceable.
+                    xyz_content = coords_to_xyz_string(
+                        coords, numbers, comment=f"rxn_smiles={reaction_smi}"
+                    )
                     f.write(xyz_content + "\n")
 
             completed_queue.put((rxn_idx, True, None))
@@ -221,14 +255,16 @@ def main():
                         help='Start reaction index')
     parser.add_argument('--end_rxn', type=int, default=None,
                         help='End reaction index (exclusive)')
-    parser.add_argument('--num_steps', type=int, default=None,
-                        help='Number of diffusion steps (overrides config value)')
+    parser.add_argument('--num_steps', type=int, default=16,
+                        help='Number of ODE steps (default: 16; overrides config value)')
     parser.add_argument('--kekulize', action='store_true',
                         help='Kekulize aromatic bonds to explicit single/double')
     parser.add_argument('--add_stereo', action='store_true',
                         help='Add stereo bond information (E/Z and chirality)')
     parser.add_argument('--batch_size', type=int, default=32,
                         help='Batch size for sampling')
+    parser.add_argument('--seed_start', type=int, default=None,
+                        help='Use reproducible consecutive RNG seeds starting at this value')
 
     args = parser.parse_args()
 
@@ -257,6 +293,8 @@ def main():
     print(f"Checkpoint: {args.ckpt}")
     print(f"Output: {args.output_dir}")
     print(f"Batch size: {args.batch_size}")
+    if args.seed_start is not None:
+        print(f"Seeds: {args.seed_start} to {args.seed_start + args.n_samples - 1}")
     if args.num_steps is not None:
         print(f"Diffusion steps: {args.num_steps} (overriding config)")
     print(f"Kekulize: {args.kekulize}")
@@ -294,7 +332,7 @@ def main():
                 target=worker,
                 args=(gpu_id, job_queue, completed_queue, args.config, args.ckpt,
                       output_dir, args.n_samples, args.num_steps,
-                      args.kekulize, args.add_stereo, args.batch_size)
+                      args.kekulize, args.add_stereo, args.batch_size, args.seed_start)
             )
             p.start()
             workers.append(p)
@@ -307,10 +345,12 @@ def main():
     monitor.join()
 
     print("\nSplitting and aggregating results...")
-    split_and_aggregate(output_dir, args.n_samples, len(reactions), args.start_rxn)
+    split_and_aggregate(
+        output_dir, args.n_samples, len(reactions), args.start_rxn, args.seed_start
+    )
 
 
-def split_and_aggregate(output_dir, n_samples, n_reactions, start_rxn):
+def split_and_aggregate(output_dir, n_samples, n_reactions, start_rxn, seed_start=None):
     """Split multi-sample XYZ files and aggregate into seed files (like TSDiff structure)."""
     output_dir = Path(output_dir)
 
@@ -348,7 +388,8 @@ def split_and_aggregate(output_dir, n_samples, n_reactions, start_rxn):
 
         # Save each structure to appropriate seed directory
         for seed_idx, structure in enumerate(structures):
-            seed_dir = output_dir / f"seed_{seed_idx}"
+            seed = seed_idx if seed_start is None else seed_start + seed_idx
+            seed_dir = output_dir / f"seed_{seed}"
             seed_dir.mkdir(exist_ok=True)
 
             seed_file = seed_dir / f"rxn_{rxn_idx + start_rxn:04d}.xyz"

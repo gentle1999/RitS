@@ -480,10 +480,10 @@ def process_reaction_smarts(r_smarts, p_smarts, charge=0, kekulize=False, add_st
     return data
 
 
-def coords_to_xyz_string(coords, numbers):
+def coords_to_xyz_string(coords, numbers, comment=""):
     """Convert coordinates and atomic numbers to XYZ format string."""
     n_atoms = len(numbers)
-    xyz_lines = [str(n_atoms), ""]
+    xyz_lines = [str(n_atoms), comment]
 
     for atomic_num, coord in zip(numbers, coords):
         symbol = Chem.GetPeriodicTable().GetElementSymbol(int(atomic_num))
@@ -535,7 +535,8 @@ def main():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
     parser.add_argument("--charge", type=int, default=0, help="Molecular charge")
     parser.add_argument(
-        "--num_steps", type=int, default=None, help="Number of diffusion steps (overrides config)"
+        "--num_steps", type=int, default=16,
+        help="Number of ODE steps (default: 16; overrides config)",
     )
     parser.add_argument(
         "--kekulize", action="store_true", help="Kekulize aromatic bonds to explicit single/double"

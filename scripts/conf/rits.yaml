@@ -1,6 +1,7 @@
 run_name: 'ts_flow_extended_data_stereo'
 outdir: null
 resume: null
+finetune_from: null
 
 ema: True
 wandb_params:
@@ -107,6 +108,10 @@ train:
   checkpoint_monitor: "val/loss"
   checkpoint_monitor_mode: min
   checkpoint_every_n_train_steps: 500
+  max_steps: -1
+  limit_train_batches: 1.0
+  limit_val_batches: 1.0
+  num_sanity_val_steps: 0
 
 evaluation:
   type: transition_states

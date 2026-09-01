@@ -16,3 +16,5 @@ scripts/convert_megaflow_checkpoint.py
 __pycache__/
 *.py[cod]
 *$py.class
+.codex-tmp
+*.egg-info/

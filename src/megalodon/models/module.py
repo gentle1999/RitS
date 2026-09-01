@@ -391,7 +391,13 @@ class Graph3DInterpolantModel(pl.LightningModule):
                         batch_geo, out[f'{key}_logits'], true_data, batch_weight=ws_t, level=level
                     )
 
-            self.log(f"{stage}/{key}_loss", sub_loss, batch_size=batch_size, prog_bar=True)
+            self.log(
+                f"{stage}/{key}_loss",
+                sub_loss,
+                batch_size=batch_size,
+                prog_bar=True,
+                sync_dist=(stage == "val"),
+            )
             loss = loss + sub_loss
 
             if loss_fn.use_distance in ["single", "triple"]:
@@ -413,8 +419,17 @@ class Graph3DInterpolantModel(pl.LightningModule):
             loss += add_loss
             self.log(f"{stage}/additional_loss_term", add_loss, batch_size=batch_size,
                      prog_bar=True)
-        self.log(f"{stage}/loss", loss, batch_size=batch_size)
-        self.log(f"{stage}/loss_epoch", loss, batch_size=batch_size, on_step=False, on_epoch=True)
+        self.log(
+            f"{stage}/loss", loss, batch_size=batch_size, sync_dist=(stage == "val")
+        )
+        self.log(
+            f"{stage}/loss_epoch",
+            loss,
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
         return loss, predictions
 
     def forward(self, batch, time):
@@ -478,7 +493,7 @@ class Graph3DInterpolantModel(pl.LightningModule):
 
     @torch.no_grad()
     def sample(self, num_samples=None, timesteps=500, time_discretization="linear", batch=None,
-            num_atoms=None, pre_format=True):
+            num_atoms=None, pre_format=True, initial_priors=None):
         """
         Generates num_samples. Can supply a batch for inital starting points for conditional sampling for any interpolants set to None.
         """
@@ -564,7 +579,18 @@ class Graph3DInterpolantModel(pl.LightningModule):
                 data[f"{key}_t"] = prior[key]
             else:
                 shape = (total_num_atoms, interpolant.num_classes)
-                data[f"{key}_t"] = prior[key] = interpolant.prior(batch_index, shape, self.device)
+                if initial_priors is not None and key in initial_priors:
+                    initial_prior = initial_priors[key].to(self.device)
+                    if tuple(initial_prior.shape) != shape:
+                        raise ValueError(
+                            f"Initial prior for {key!r} has shape "
+                            f"{tuple(initial_prior.shape)}, expected {shape}"
+                        )
+                    data[f"{key}_t"] = prior[key] = initial_prior
+                else:
+                    data[f"{key}_t"] = prior[key] = interpolant.prior(
+                        batch_index, shape, self.device
+                    )
         # Iterate through time, query the dynamics, apply interpolant step update
 
         out = {}

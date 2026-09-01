@@ -198,15 +198,26 @@ python scripts/train.py \
     outdir="../test_runs" \
     data.dataset_root="./data/ts1x"
 
-# Resume training from checkpoint
+# Fine-tune pretrained weights with a fresh optimizer and scheduler
 python scripts/train.py \
     --config-path=conf \
     --config-name rits \
     train.gpus=1 \
     train.seed=28 \
-    run_name=test_train \
+    run_name=test_finetune \
     outdir="../test_runs" \
-    resume="./data/rits.ckpt"
+    data.dataset_root="./data/ts1x" \
+    finetune_from="./data/rits.ckpt"
+
+# Resume an interrupted run, including its optimizer, scheduler, epoch, and step
+python scripts/train.py \
+    --config-path=conf \
+    --config-name rits \
+    train.gpus=1 \
+    run_name=test_resume \
+    outdir="../test_runs" \
+    data.dataset_root="./data/ts1x" \
+    resume="./test_runs/test_resume/checkpoints/last.ckpt"
 
 # Customize training parameters
 python scripts/train.py \
@@ -219,6 +230,43 @@ python scripts/train.py \
     data.batch_size=150 \
     optimizer.lr=0.0001
 ```
+
+Training writes metrics to both the configured W&B logger and TensorBoard.
+For DPA TS fine-tuning on the 96 GiB workstation GPU, resume the latest
+checkpoint with the high-memory single-GPU configuration:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src python scripts/train.py \
+    --config-path=conf \
+    --config-name=dpa_ts_finetune \
+    resume=outputs/dpa_ts_finetune_rits_seed48/checkpoints/last.ckpt \
+    finetune_from=null
+```
+
+The DPA configuration uses a reference batch size of 1000. This leaves enough
+headroom for the largest MiDi bucket while still using most of a 96 GiB GPU.
+
+TensorBoard event files are written under
+`outputs/dpa_ts_finetune_rits_seed48/tensorboard/`. Start the monitor with:
+
+```bash
+tensorboard --logdir outputs/dpa_ts_finetune_rits_seed48/tensorboard
+```
+
+Evaluate a checkpoint on the DPA test split with 16 ODE steps and atom-ordered
+Kabsch RMSD. The report includes paired all-atom/heavy-atom RMSD plus
+generated-to-reference and reference-to-generated nearest-conformer metrics:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src python scripts/evaluate_ts_kabsch.py \
+    --config scripts/conf/dpa_ts_finetune.yaml \
+    --ckpt outputs/dpa_ts_finetune_rits_seed48/checkpoints/best.ckpt \
+    --num_steps 16 \
+    --batch_size 256
+```
+
+The evaluator writes `summary.json` and per-structure values in
+`per_structure.csv` next to the evaluation output directory.
 
 ### Model Inference and Sampling
 
@@ -266,6 +314,91 @@ python scripts/sample_transition_state.py \
 - SMILES must have explicit hydrogens and can use atom mapping to specify atom correspondence
 - Reactant and product must have the same number of atoms
 - Output is saved as XYZ file(s) with transition state coordinates
+
+#### Unified Candidate Generation, Clustering, and g-xTB Ranking
+
+`scripts/run_ts_pipeline.py` provides one interface for reproducible candidate
+generation, per-reaction Kabsch RMSD clustering, and g-xTB single-point energy
+ranking. The default `hybrid` generation strategy keeps all seeds of a reaction
+adjacent while using a global atom-budget batch, combining rxn-level graph
+locality with per-seed output, load balancing, and restart support.
+
+The `--reactions` input may be either a newline-delimited reaction file or the
+full CSV directly; for CSV input the `rxn_smiles` column is used and its source
+row index is preserved in all output tables and XYZ comments.
+
+g-xTB is distinct from GFN1-xTB and GFN2-xTB. The upstream g-xTB project ships
+a modified `xtb` executable that uses a modified tblite library internally;
+run it with `--gxtb`. Standard `tblite.interface.Calculator` releases do not
+currently expose a `g-xTB` calculator name. Install the official Linux binary
+from [grimme-lab/g-xtb](https://github.com/grimme-lab/g-xtb) and pass its path
+with `--gxtb-binary`. The normal tblite packages can be installed with:
+
+```bash
+conda install -n rits -c conda-forge tblite tblite-python
+```
+
+Generate 100 deterministic candidates per reaction, first apply the strict
+mapped tetrahedral/E-Z stereo-sign filter, then cluster them, evaluate one
+geometric medoid per cluster with g-xTB, discard clusters whose medoid is above
+the reaction-level energy window, then evaluate all members of the retained
+clusters and output the lowest-energy member of each cluster. This staged mode
+is the default and avoids running g-xTB on geometries that are already redundant
+by RMSD. The default medoid filter is `0.01 Eh` (about `6.28 kcal/mol`) above
+the lowest medoid energy for that reaction; adjust it with
+`--energy-window-hartree`:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src python scripts/run_ts_pipeline.py \
+    --generate \
+    --reactions data/new_full_df_exact_balanced_40ene_40diene.csv \
+    --config scripts/conf/dpa_ts_finetune.yaml \
+    --ckpt data/rits.ckpt \
+    --candidates outputs/dpa_candidates \
+    --output outputs/dpa_candidates_gxtb \
+    --generation-strategy hybrid \
+    --n-samples 100 \
+    --num-steps 16 \
+    --max-atoms-per-batch 18000 \
+    --cluster-atoms heavy \
+    --cluster-threshold 0.5 \
+    --energy-scope staged \
+    --energy-window-hartree 0.01 \
+    --gxtb-binary /path/to/gxtb-enabled/xtb \
+    --energy-workers 32 \
+    --omp-threads 1
+```
+
+The stereo filter is enabled by default and runs before RMSD clustering. Use
+`--no-stereo-filter` only for an explicit ablation or comparison run.
+
+Run the same command with `--ckpt data/rits.ckpt` for zero-shot generation or
+with the full-DPA checkpoint used for the existing full-DPA candidates, for
+example `outputs/dpa_ts_stereo_clean_all_target_long_seed48/checkpoints/best-epoch=380-step=7239.ckpt`.
+For two-GPU execution, launch two processes with disjoint original reaction
+ranges (for example `0:1484` and `1484:2968`) and separate output directories;
+the same `--start-reaction`/`--end-reaction` range also limits evaluation when
+ranking a shared candidate directory:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src python scripts/run_ts_pipeline.py ... \
+    --start-reaction 0 --end-reaction 1484 \
+    --candidates outputs/dpa_candidates/gpu0 \
+    --output outputs/dpa_candidates_gxtb/gpu0
+CUDA_VISIBLE_DEVICES=1 PYTHONPATH=src python scripts/run_ts_pipeline.py ... \
+    --start-reaction 1484 --end-reaction 2968 \
+    --candidates outputs/dpa_candidates/gpu1 \
+    --output outputs/dpa_candidates_gxtb/gpu1
+```
+
+Omit `--generate`, `--config`, and `--ckpt` to cluster and rank an existing
+`seed_*/rxn_*.xyz` candidate directory. Energy results are appended to
+`energy_results.csv`, so interrupted g-xTB runs resume without recalculating
+successful candidates. Use `--energy-scope medoids` for the cheaper medoid-only
+ranking, or `--energy-scope all` only when exhaustive candidate-level energy
+ranking is specifically required. Staged evaluation primarily reduces CPU
+work; when most clusters pass the medoid filter, direct `all` evaluation with
+more single-threaded workers can have similar or better wall-clock throughput.
 
 #### Available Configurations
 

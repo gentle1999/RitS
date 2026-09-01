@@ -45,6 +45,7 @@ class MoleculeDataModule(LightningDataModule):
             batch_size: Optional[int] = None,
             data_loader_type: str = "adaptive",
             inference_batch_size: Optional[int] = None,
+            validation_data_loader_type: Optional[str] = None,
             **sampler_kwargs,
     ):
         super().__init__()
@@ -53,6 +54,7 @@ class MoleculeDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.inference_batch_size = inference_batch_size or batch_size
         self.data_loader_type = data_loader_type
+        self.validation_data_loader_type = validation_data_loader_type or data_loader_type
         self.sampler_kwargs = sampler_kwargs
         self.pin_memory = True
         
@@ -81,17 +83,32 @@ class MoleculeDataModule(LightningDataModule):
 
     def val_dataloader(self):
         """Returns the DataLoader for validation dataset."""
-        return self._create_dataloader(self.val_dataset, self.inference_batch_size, shuffle=True)
+        return self._create_dataloader(
+            self.val_dataset,
+            self.inference_batch_size,
+            shuffle=False,
+            data_loader_type=self.validation_data_loader_type,
+        )
 
     def test_dataloader(self):
         """Returns the DataLoader for test dataset."""
-        return self._create_dataloader(self.test_dataset, self.inference_batch_size, shuffle=False)
+        return self._create_dataloader(
+            self.test_dataset,
+            self.inference_batch_size,
+            shuffle=False,
+            data_loader_type=self.validation_data_loader_type,
+        )
 
     def predict_dataloader(self):
         """Returns the DataLoader for prediction dataset."""
-        return self._create_dataloader(self.test_dataset, self.inference_batch_size, shuffle=False)
+        return self._create_dataloader(
+            self.test_dataset,
+            self.inference_batch_size,
+            shuffle=False,
+            data_loader_type=self.validation_data_loader_type,
+        )
 
-    def _create_dataloader(self, dataset, batch_size, shuffle):
+    def _create_dataloader(self, dataset, batch_size, shuffle, data_loader_type=None):
         """Creates a DataLoader for a given dataset.
 
         Args:
@@ -102,12 +119,13 @@ class MoleculeDataModule(LightningDataModule):
         Returns:
             DataLoader: The DataLoader for the given dataset.
         """
-        if self.data_loader_type == "adaptive":
+        data_loader_type = data_loader_type or self.data_loader_type
+        if data_loader_type == "adaptive":
             sampler = AdaptiveBatchSampler(dataset, reference_batch_size=batch_size,
                                            **self.sampler_kwargs)
-        elif self.data_loader_type == "dynamic":
+        elif data_loader_type == "dynamic":
             sampler = DynamicBatchSampler(dataset, **self.sampler_kwargs)
-        elif self.data_loader_type == "midi":
+        elif data_loader_type == "midi":
             return MiDiDataloader(dataset, batch_size=batch_size, shuffle=shuffle,
                                   **self.sampler_kwargs)
         else:

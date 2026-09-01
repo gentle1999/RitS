@@ -2,7 +2,7 @@ import torch
 
 from megalodon.data.random_rotations import random_rotations
 from torch_geometric.utils import coalesce
-from torch_geometric.utils import dense_to_sparse, sort_edge_index
+from torch_geometric.utils import sort_edge_index
 from torch_scatter import scatter_mean
 
 
@@ -14,12 +14,22 @@ def make_graph_fully_connected(edge_index, edge_attr, batch):
     bond_edge_index, bond_edge_attr = coalesce(bond_edge_index, bond_edge_attr,
                                                reduce="min")
 
-    # Create Fully Connected Graph instead
-    edge_index_global = (
-        torch.eq(batch.unsqueeze(0),
-                 batch.unsqueeze(-1)).int().fill_diagonal_(0)
-    )
-    edge_index_global, _ = dense_to_sparse(edge_index_global)
+    # Build block-diagonal fully connected edges without allocating a
+    # [total_nodes, total_nodes] dense matrix.
+    node_counts = torch.bincount(batch)
+    max_nodes = int(node_counts.max())
+    local_nodes = torch.arange(max_nodes, device=batch.device)
+    node_mask = local_nodes.unsqueeze(0) < node_counts.unsqueeze(1)
+    edge_mask = node_mask.unsqueeze(2) & node_mask.unsqueeze(1)
+    edge_mask &= ~torch.eye(max_nodes, dtype=torch.bool, device=batch.device).unsqueeze(0)
+    graph_idx, local_source, local_target = edge_mask.nonzero(as_tuple=True)
+    node_offsets = torch.cat([
+        node_counts.new_zeros(1), node_counts.cumsum(0)[:-1]
+    ])
+    edge_index_global = torch.stack([
+        node_offsets[graph_idx] + local_source,
+        node_offsets[graph_idx] + local_target,
+    ])
     edge_index_global = sort_edge_index(edge_index_global, sort_by_row=False)
     # Handle cases where edge_attr is N or NxK
     if edge_attr.dim() == 1:  # Case where edge_attr is (N,)
