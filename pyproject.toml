@@ -14,20 +14,23 @@ license = { file = "LICENSE.md" }
 dynamic = ["version"]
 dependencies = [
     # external
-    'torch==2.12.0',
-    'torch_geometric==2.8.0',
-    'torch-sparse==0.6.18',
-    'torch-scatter==2.1.2',
-    'hydra-core==1.3.2',
-    'omegaconf==2.3.0',
-    'rdkit==2026.3.3',
-    'lightning==2.6.5',
-    'einops==0.8.2',
-    'wandb==0.27.2',
-    'zarr==2.18.3',
-    'numcodecs==0.13.1',
-    'h5py==3.12.1',
-    'pandas==2.3.3',
+    'torch>=2.12,<2.13',
+    'torch-geometric>=2.8,<3',
+    'torch-sparse>=0.6.18,<0.7',
+    'torch-scatter>=2.1.2,<2.2',
+    'hydra-core>=1.3.2,<2',
+    'omegaconf>=2.3.0,<3',
+    'rdkit>=2025.3.2,<2027',
+    'lightning>=2.5.1,<3',
+    'einops>=0.8.1,<1',
+    'wandb>=0.19.11,<1',
+    'zarr>=2.18.3,<3',
+    'numcodecs>=0.13.1,<0.16,!=0.14.0,!=0.14.1',
+    'h5py>=3.9,<4',
+    'numpy>=1.24,<3',
+    'pandas>=2.2.3,<3',
+    'scipy>=1.10,<2',
+    'tqdm>=4.67.1,<5',
 ]
 
 [project.urls]

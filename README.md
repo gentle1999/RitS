@@ -90,8 +90,11 @@ pip install -e .
 
 If you prefer a fully conda-based setup (recommended for RDKit), you can install RDKit via conda-forge before running `pip install -r requirements.txt`.
 
-The pinned dependencies include `h5py`, `numcodecs`, and the Zarr v2 API used
-by the HDF5 preprocessing pipeline.
+The dependency ranges include `h5py`, `numcodecs`, and a Zarr v2 range because
+the HDF5 preprocessing pipeline uses the Zarr v2 API. The PyTorch Geometric
+compiled wheels remain tied to the PyTorch 2.12 / CUDA 13.2 combination in
+`requirements.txt`; use the PyG installation guide to replace those entries
+for a different PyTorch, CUDA, ROCm, or CPU setup.
 
 For the interactive Streamlit app and IRC post-processing, also install:
 
