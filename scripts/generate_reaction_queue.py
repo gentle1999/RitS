@@ -267,6 +267,7 @@ def main():
         sampling_params=cfg.sample,
         batch_preprocessor=batch_preprocessor,
         strict=True,
+        weights_only=False,
     ).to(args.device).eval()
 
     reaction_data = load_reactions(
